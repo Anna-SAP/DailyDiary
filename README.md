@@ -1,0 +1,2 @@
+# DailyDiary
+DailyDiary by Claude
