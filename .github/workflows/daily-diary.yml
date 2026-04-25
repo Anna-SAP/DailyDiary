@@ -1,0 +1,68 @@
+name: Daily Diary
+
+on:
+  schedule:
+    # 每天 23:50 CST (UTC+8) = 15:50 UTC
+    - cron: '50 15 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  write-diary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate diary entry
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          DATE=$(date -u -d '+8 hours' +%Y-%m-%d)
+          DIARY_FILE="diary/${DATE}.md"
+
+          if [ -f "$DIARY_FILE" ]; then
+            echo "Diary for ${DATE} already exists, skipping."
+            exit 0
+          fi
+
+          RESPONSE=$(curl -s https://api.anthropic.com/v1/messages \
+            -H "content-type: application/json" \
+            -H "x-api-key: ${ANTHROPIC_API_KEY}" \
+            -H "anthropic-version: 2023-06-01" \
+            -d "$(cat <<EOF
+          {
+            "model": "claude-sonnet-4-20250514",
+            "max_tokens": 1024,
+            "messages": [
+              {
+                "role": "user",
+                "content": "请用简体中文写一篇今天（${DATE}）的日记，记录这一天的感受。格式以 '# ${DATE} 日记' 开头，内容真挚自然，富有生活气息，300字左右。直接输出日记内容，不要任何额外说明。"
+              }
+            ]
+          }
+          EOF
+          )")
+
+          mkdir -p diary
+          echo "$RESPONSE" | python3 -c "
+          import sys, json
+          data = json.load(sys.stdin)
+          print(data['content'][0]['text'])
+          " > "$DIARY_FILE"
+
+          echo "Generated: $DIARY_FILE"
+
+      - name: Commit and push
+        run: |
+          DATE=$(date -u -d '+8 hours' +%Y-%m-%d)
+          DIARY_FILE="diary/${DATE}.md"
+          if [ -f "$DIARY_FILE" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add "$DIARY_FILE"
+            git diff --cached --quiet && exit 0
+            git commit -m "Add daily diary entry for ${DATE}"
+            git push
+          fi
